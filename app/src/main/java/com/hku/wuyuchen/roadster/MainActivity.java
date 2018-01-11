@@ -1,6 +1,10 @@
 package com.hku.wuyuchen.roadster;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+
+import java.lang.Math;
 
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
@@ -13,6 +17,7 @@ import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfFloat;
 import org.opencv.core.MatOfInt;
+import org.opencv.core.MatOfPoint;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
@@ -20,11 +25,13 @@ import org.opencv.imgproc.Imgproc;
 
 import android.R.string;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Button;
 import android.view.View;
 import android.view.View.OnClickListener;
+
 
 public class MainActivity extends Activity implements CvCameraViewListener2{
     private String TAG = "OpenCV_Test";
@@ -81,7 +88,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
         mButton.setOnClickListener(new OnClickListener(){
             @Override
             public void onClick(View v) {
-                if(Cur_State<8){
+                if(Cur_State<1){
                     //切换状态
                     Cur_State ++;
                 }else{
@@ -159,92 +166,54 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
         mRgba = inputFrame.rgba();
         Size sizeRgba = mRgba.size();
-        int rows = (int) sizeRgba.height;
-        int cols = (int) sizeRgba.width;
-        Mat rgbaInnerWindow;
-
-        int left = cols / 8;
-        int top = rows / 8;
-
-        int width = cols * 3 / 4;
-        int height = rows * 3 / 4;
+        int height = (int) sizeRgba.height;
+        int width = (int) sizeRgba.width;
 
         switch (Cur_State) {
             case 1:
-                //灰化处理
+                //Step 1: Gray Scale Transformation
                 Imgproc.cvtColor(inputFrame.gray(), mRgba, Imgproc.COLOR_GRAY2RGBA,4);
-                break;
-            case 2:
-                //Canny边缘检测
-                mRgba = inputFrame.rgba();
-                Imgproc.Canny(inputFrame.gray(), mTmp, 80, 100);
-                Imgproc.cvtColor(mTmp, mRgba, Imgproc.COLOR_GRAY2RGBA, 4);
-                break;
-            case 3:
-                //Hist直方图计算
-                Mat hist = new Mat();
-                int thikness = (int) (sizeRgba.width / (mHistSizeNum + 10) / 5);
-                if(thikness > 5) thikness = 5;
-                int offset = (int) ((sizeRgba.width - (5*mHistSizeNum + 4*10)*thikness)/2);
 
-                // RGB
-                for(int c=0; c<3; c++) {
-                    Imgproc.calcHist(Arrays.asList(mRgba), mChannels[c], mMat0, hist, mHistSize, mRanges);
-                    Core.normalize(hist, hist, sizeRgba.height/2, 0, Core.NORM_INF);
-                    hist.get(0, 0, mBuff);
-                    for(int h=0; h<mHistSizeNum; h++) {
-                        mP1.x = mP2.x = offset + (c * (mHistSizeNum + 10) + h) * thikness;
-                        mP1.y = sizeRgba.height-1;
-                        mP2.y = mP1.y - 2 - (int)mBuff[h];
-                        Imgproc.line(mRgba, mP1, mP2, mColorsRGB[c], thikness);
-                    }
+                //Step 2: Gaussian Smoothing
+                int blur_ksize = 5; //Gaussian blur kernel size
+                Imgproc.GaussianBlur(mRgba, mRgba, new Size(blur_ksize,blur_ksize), 0);
+
+                //Step 3: Canny Edge Detection
+                int canny_lthreshold = 50;  //Canny edge detection low threshold
+                int canny_hthreshold = 150; //Canny edge detection high threshold
+                Imgproc.Canny(inputFrame.gray(), mRgba, canny_lthreshold, canny_hthreshold);
+
+                //Step 4: ROI(Range of Interest)
+                Scalar color = new Scalar(0,0,0);//black
+                List<MatOfPoint> pts = new ArrayList<>();
+                MatOfPoint blk1 = new MatOfPoint(new Point(0,0), new Point(0,height), new Point(width/2,height/2), new Point(width,height), new Point(width,0));
+                pts.add(blk1);
+                Imgproc.fillPoly(mRgba,pts,color);
+
+                //Step 5: Hough Transformation
+                int rho = 1;
+                double theta = Math.PI / 180;
+                int threshold = 15;
+                int min_line_length = 40;
+                int max_line_gap = 20;
+                Mat lines = new Mat();
+                Imgproc.HoughLinesP(mRgba, lines,rho, theta, threshold, min_line_length, max_line_gap);
+
+                Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_GRAY2BGR,4);//恢复成彩图，车道线为彩色
+
+                Scalar line_color = new Scalar(255,0,0);//red
+                int line_thickness = 2;
+                for (int y=0;y<lines.rows();y++){
+                    double[] vec = lines.get(y,0);
+                    double x1 = vec[0];
+                    double y1 = vec[1];
+                    double x2 = vec[2];
+                    double y2 = vec[3];
+                    Point start = new Point(x1, y1);
+                    Point end = new Point (x2, y2);
+                    Imgproc.line(mRgba, start, end, line_color, line_thickness);
                 }
-                // Value and Hue
-                Imgproc.cvtColor(mRgba, mTmp, Imgproc.COLOR_RGB2HSV_FULL);
-                // Value
-                Imgproc.calcHist(Arrays.asList(mTmp), mChannels[2], mMat0, hist, mHistSize, mRanges);
-                Core.normalize(hist, hist, sizeRgba.height/2, 0, Core.NORM_INF);
-                hist.get(0, 0, mBuff);
-                for(int h=0; h<mHistSizeNum; h++) {
-                    mP1.x = mP2.x = offset + (3 * (mHistSizeNum + 10) + h) * thikness;
-                    mP1.y = sizeRgba.height-1;
-                    mP2.y = mP1.y - 2 - (int)mBuff[h];
-                    Imgproc.line(mRgba, mP1, mP2, mWhilte, thikness);
-                }
-                break;
-            case 4:
-                //Sobel边缘检测
-                Mat gray = inputFrame.gray();
-                Mat grayInnerWindow = gray.submat(top, top + height, left, left + width);
-                rgbaInnerWindow = mRgba.submat(top, top + height, left, left + width);
-                Imgproc.Sobel(grayInnerWindow, mIntermediateMat, CvType.CV_8U, 1, 1);
-                Core.convertScaleAbs(mIntermediateMat, mIntermediateMat, 10, 0);
-                Imgproc.cvtColor(mIntermediateMat, rgbaInnerWindow, Imgproc.COLOR_GRAY2BGRA, 4);
-                grayInnerWindow.release();
-                rgbaInnerWindow.release();
-                break;
-            case 5:
-                //SEPIA(色调变换)
-                rgbaInnerWindow = mRgba.submat(top, top + height, left, left + width);
-                Core.transform(rgbaInnerWindow, rgbaInnerWindow, mSepiaKernel);
-                rgbaInnerWindow.release();
-                break;
-            case 6:
-                //ZOOM放大镜
-                Mat zoomCorner = mRgba.submat(0, rows / 2 - rows / 10, 0, cols / 2 - cols / 10);
-                Mat mZoomWindow = mRgba.submat(rows / 2 - 9 * rows / 100, rows / 2 + 9 * rows / 100, cols / 2 - 9 * cols / 100, cols / 2 + 9 * cols / 100);
-                Imgproc.resize(mZoomWindow, zoomCorner, zoomCorner.size());
-                Size wsize = mZoomWindow.size();
-                Imgproc.rectangle(mZoomWindow, new Point(1, 1), new Point(wsize.width - 2, wsize.height - 2), new Scalar(255, 0, 0, 255), 2);
-                zoomCorner.release();
-                mZoomWindow.release();
-                break;
-            case 7:
-                //PIXELIZE像素化
-                rgbaInnerWindow = mRgba.submat(top, top + height, left, left + width);
-                Imgproc.resize(rgbaInnerWindow, mIntermediateMat, mSize0, 0.1, 0.1, Imgproc.INTER_NEAREST);
-                Imgproc.resize(mIntermediateMat, rgbaInnerWindow, rgbaInnerWindow.size(), 0., 0., Imgproc.INTER_NEAREST);
-                rgbaInnerWindow.release();
+
                 break;
             default:
                 //显示原图
@@ -254,4 +223,5 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
         //返回处理后的结果数据
         return mRgba;
     }
+
 }
