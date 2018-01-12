@@ -165,6 +165,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
     @Override
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
         mRgba = inputFrame.rgba();
+        mTmp = mRgba.clone();
         Size sizeRgba = mRgba.size();
         int height = (int) sizeRgba.height;
         int width = (int) sizeRgba.width;
@@ -175,18 +176,19 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                 Imgproc.cvtColor(inputFrame.gray(), mRgba, Imgproc.COLOR_GRAY2RGBA,4);
 
                 //Step 2: Gaussian Smoothing
-                int blur_ksize = 5; //Gaussian blur kernel size
-                Imgproc.GaussianBlur(mRgba, mRgba, new Size(blur_ksize,blur_ksize), 0);
+                int ksize = 5; //Gaussian blur kernel size
+                Imgproc.GaussianBlur(mRgba, mRgba, new Size(ksize,ksize), 0);
 
                 //Step 3: Canny Edge Detection
                 int canny_lthreshold = 50;  //Canny edge detection low threshold
                 int canny_hthreshold = 150; //Canny edge detection high threshold
-                Imgproc.Canny(inputFrame.gray(), mRgba, canny_lthreshold, canny_hthreshold);
+                Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_RGBA2GRAY,4);
+                Imgproc.Canny(mRgba, mRgba, canny_lthreshold, canny_hthreshold);
 
                 //Step 4: ROI(Range of Interest)
                 Scalar color = new Scalar(0,0,0);//black
                 List<MatOfPoint> pts = new ArrayList<>();
-                MatOfPoint blk1 = new MatOfPoint(new Point(0,0), new Point(0,height), new Point(width/2,height/2), new Point(width,height), new Point(width,0));
+                MatOfPoint blk1 = new MatOfPoint(new Point(0,0), new Point(0,height), new Point(width/4,height/2), new Point(width*3/4,height/2), new Point(width,height), new Point(width,0));
                 pts.add(blk1);
                 Imgproc.fillPoly(mRgba,pts,color);
 
@@ -199,8 +201,9 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                 Mat lines = new Mat();
                 Imgproc.HoughLinesP(mRgba, lines,rho, theta, threshold, min_line_length, max_line_gap);
 
-                Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_GRAY2BGR,4);//恢复成彩图，车道线为彩色
-
+                Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_GRAY2RGBA,4);//恢复成彩图，车道线为彩色
+                Mat img_line = mRgba;
+                Core.setIdentity(img_line, new Scalar(0,0,0));//变成纯黑图
                 Scalar line_color = new Scalar(255,0,0);//red
                 int line_thickness = 2;
                 for (int y=0;y<lines.rows();y++){
@@ -209,11 +212,19 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                     double y1 = vec[1];
                     double x2 = vec[2];
                     double y2 = vec[3];
-                    Point start = new Point(x1, y1);
-                    Point end = new Point (x2, y2);
-                    Imgproc.line(mRgba, start, end, line_color, line_thickness);
+                    if (x2==x1) continue;
+                    double k = (y1-y2)/(x2-x1);//傻逼的安卓坐标系
+                    if (k>0&&k>Math.tan(Math.toRadians(15)) || k<0&&k<Math.tan(Math.toRadians(165))){
+                        //过滤干扰横线
+                        //车道线角度范围15~165°
+                        Point start = new Point(x1, y1);
+                        Point end = new Point(x2, y2);
+                        Imgproc.line(img_line, start, end, line_color, line_thickness);
+                    }
                 }
 
+                //Step 6: Add to the original image
+                Core.addWeighted(img_line, 0.8, mTmp, 1, 0, mRgba);
                 break;
             default:
                 //显示原图
