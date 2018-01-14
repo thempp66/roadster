@@ -2,9 +2,11 @@ package com.hku.wuyuchen.roadster;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 
 import java.lang.Math;
+import java.util.Vector;
 
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
@@ -199,31 +201,91 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                 int min_line_length = 40;
                 int max_line_gap = 20;
                 Mat lines = new Mat();
-                Imgproc.HoughLinesP(mRgba, lines,rho, theta, threshold, min_line_length, max_line_gap);
+                Imgproc.HoughLinesP(mRgba, lines, rho, theta, threshold, min_line_length, max_line_gap);
 
+                //Step 6: Lane division
                 Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_GRAY2RGBA,4);//恢复成彩图，车道线为彩色
                 Mat img_line = mRgba;
                 Core.setIdentity(img_line, new Scalar(0,0,0));//变成纯黑图
-                Scalar line_color = new Scalar(255,0,0);//red
-                int line_thickness = 2;
+                List<Point> points_left = new LinkedList<Point>();
+                List<Point> points_right = new LinkedList<Point>();
                 for (int y=0;y<lines.rows();y++){
                     double[] vec = lines.get(y,0);
                     double x1 = vec[0];
                     double y1 = vec[1];
                     double x2 = vec[2];
                     double y2 = vec[3];
-                    if (x2==x1) continue;
-                    double k = (y1-y2)/(x2-x1);//傻逼的安卓坐标系
-                    if (k>0&&k>Math.tan(Math.toRadians(15)) || k<0&&k<Math.tan(Math.toRadians(165))){
+                    double k = 0;
+                    if (x2!=x1){
+                        k = (y1-y2)/(x2-x1);//傻逼的安卓坐标系
+                    }
+                    if (x2==x1 || k>0&&k>Math.tan(Math.toRadians(15))){
+                        //90°也算，即x2==x1
+                        //左车道线
                         //过滤干扰横线
                         //车道线角度范围15~165°
                         Point start = new Point(x1, y1);
                         Point end = new Point(x2, y2);
-                        Imgproc.line(img_line, start, end, line_color, line_thickness);
+                        points_left.add(start);
+                        points_left.add(end);
+                    }
+                    if (k<0&&k<Math.tan(Math.toRadians(165))){
+                        //右车道线
+                        //过滤干扰横线
+                        //车道线角度范围15~165°
+                        Point start = new Point(x1, y1);
+                        Point end = new Point(x2, y2);
+                        points_right.add(start);
+                        points_right.add(end);
                     }
                 }
 
-                //Step 6: Add to the original image
+                //Step 7 Linear Regression & draw the two line
+                //识别直线的起始点，圈圈标出
+//                for (int i = 0; i < points_left.size(); i++)
+//                {
+//                    Imgproc.circle(mRgba, points_left.get(i), 5, new Scalar(0, 0, 255), 2, 8, 0);
+//                }
+//                for (int i = 0; i < points_right.size(); i++)
+//                {
+//                    Imgproc.circle(mRgba, points_right.get(i), 5, new Scalar(0, 255, 0), 2, 8, 0);
+//                }
+                Mat line_left_para = new Mat();
+                Point[] array_points_left = points_left.toArray(new Point[points_left.size()]);
+                MatOfPoint mat_points_left = new MatOfPoint(array_points_left);
+                if (array_points_left.length>0) {
+                    Imgproc.fitLine(mat_points_left, line_left_para, Imgproc.CV_DIST_L2, 0, 1e-2, 1e-2);
+                    //第3个参数：距离类型，L2为方差
+                    //第4个参数：距离参数，一般为0
+                    //第5个参数：径向的精度参数，一般为1e-2
+                    //第6个参数：角度精度参数，一般为1e-2
+                    Point point0_left = new Point(line_left_para.get(2, 0)[0], line_left_para.get(3, 0)[0]);
+                    double k_left = line_left_para.get(1, 0)[0] / line_left_para.get(0, 0)[0];
+                    Point point1_left = new Point(0, k_left * (0 - point0_left.x) + point0_left.y);//计算端点 y=k(x-x0)+y0
+                    Point point2_left = new Point(width / 2, k_left * (width / 2 - point0_left.x) + point0_left.y);
+                    Scalar line_color = new Scalar(255, 0, 0);//red
+                    int line_thickness = 2;
+                    Imgproc.line(img_line, point1_left, point2_left, line_color, line_thickness);
+                }
+                Mat line_right_para = new Mat();
+                Point[] array_points_right = points_right.toArray(new Point[points_right.size()]);
+                MatOfPoint mat_points_right = new MatOfPoint(array_points_right);
+                if (array_points_right.length>0) {
+                    Imgproc.fitLine(mat_points_right, line_right_para, Imgproc.CV_DIST_L2, 0, 1e-2, 1e-2);
+                    //第3个参数：距离类型，L2为方差
+                    //第4个参数：距离参数，一般为0
+                    //第5个参数：径向的精度参数，一般为1e-2
+                    //第6个参数：角度精度参数，一般为1e-2
+                    Point point0_right = new Point(line_right_para.get(2, 0)[0], line_right_para.get(3, 0)[0]);
+                    double k_right = line_right_para.get(1, 0)[0] / line_right_para.get(0, 0)[0];
+                    Point point1_right = new Point(width, k_right * (width - point0_right.x) + point0_right.y);//计算端点 y=k(x-x0)+y0
+                    Point point2_right = new Point(width / 2, k_right * (width / 2 - point0_right.x) + point0_right.y);
+                    Scalar line_color = new Scalar(255, 0, 0);//red
+                    int line_thickness = 2;
+                    Imgproc.line(img_line, point1_right, point2_right, line_color, line_thickness);
+                }
+
+                //Step 8: Add to the original image
                 Core.addWeighted(img_line, 0.8, mTmp, 1, 0, mRgba);
                 break;
             default:
