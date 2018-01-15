@@ -190,7 +190,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                 //Step 4: ROI(Range of Interest)
                 Scalar color = new Scalar(0,0,0);//black
                 List<MatOfPoint> pts = new ArrayList<>();
-                MatOfPoint blk1 = new MatOfPoint(new Point(0,0), new Point(0,height), new Point(width/4,height/2), new Point(width*3/4,height/2), new Point(width,height), new Point(width,0));
+                MatOfPoint blk1 = new MatOfPoint(new Point(0,0), new Point(0,height), new Point(width/4,height* 3/5), new Point(width*3/4,height* 3/5), new Point(width,height), new Point(width,0));
                 pts.add(blk1);
                 Imgproc.fillPoly(mRgba,pts,color);
 
@@ -198,7 +198,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                 int rho = 1;
                 double theta = Math.PI / 180;
                 int threshold = 15;
-                int min_line_length = 40;
+                int min_line_length = 35;
                 int max_line_gap = 20;
                 Mat lines = new Mat();
                 Imgproc.HoughLinesP(mRgba, lines, rho, theta, threshold, min_line_length, max_line_gap);
@@ -240,8 +240,8 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                 }
 
                 //Step 7 Linear Regression & draw the two line
-                make_line(points_left, mRgba, width, "left");//画左车道
-                make_line(points_right, mRgba, width, "right");//画右车道
+                make_line(points_left, mRgba, width, height);//画左车道
+                make_line(points_right, mRgba, width, height);//画右车道
 
                 //Step 8: Add to the original image
                 Core.addWeighted(mRgba, 0.8, mTmp, 1, 0, mRgba);
@@ -258,7 +258,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
     /**
      * 相关函数写在这里
      */
-    public void make_line(List<Point> points, Mat img, double width, String lane){
+    public void make_line(List<Point> points, Mat img, double width, double height){
         /**点-》线性回归-》线**/
 //        //识别直线的起始点，圈圈标出，测试用
 //        for (int i = 0; i < points.size(); i++)
@@ -276,18 +276,11 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
             //第6个参数：角度精度参数，一般为1e-2
             Point point0 = new Point(line_para.get(2, 0)[0], line_para.get(3, 0)[0]);
             double k = line_para.get(1, 0)[0] / line_para.get(0, 0)[0];
-            //计算端点p1,p2: y=k(x-x0)+y0
-            Point point1 = new Point();
-            Point point2 = new Point();
-            if (lane.equals("left")){
-                point1 = new Point(0, k * (0 - point0.x) + point0.y);
-                point2 = new Point(width * 2 / 5, k * (width * 2 / 5 - point0.x) + point0.y);
-            }else if (lane.equals("right")) {
-                point1 = new Point(width, k * (width - point0.x) + point0.y);
-                point2 = new Point(width * 3 / 5, k * (width * 3 / 5 - point0.x) + point0.y);
-            }else{
-                Log.e("Lane para err",lane);
-            }
+            if (k==0) return;
+            //计算端点p1,p2:
+            //第二种方式 x=(y+k*x0-y0)/k ,注意k为0
+            Point point1 = new Point((height + k * point0.x - point0.y)/k, height);
+            Point point2 = new Point((height * 3/5 + k * point0.x - point0.y)/k, height * 3/5);
 
             Scalar line_color = new Scalar(255, 0, 0);//red
             int line_thickness = 2;
