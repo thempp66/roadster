@@ -85,7 +85,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
 
         mCVCamera = (CameraBridgeViewBase) findViewById(R.id.camera_view);
         mCVCamera.setCvCameraViewListener(this);
-
+        
         mButton = (Button) findViewById(R.id.deal_btn);
         mButton.setOnClickListener(new OnClickListener(){
             @Override
