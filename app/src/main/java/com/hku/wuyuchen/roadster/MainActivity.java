@@ -262,7 +262,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                     Point point0_left = new Point(line_left_para.get(2, 0)[0], line_left_para.get(3, 0)[0]);
                     double k_left = line_left_para.get(1, 0)[0] / line_left_para.get(0, 0)[0];
                     Point point1_left = new Point(0, k_left * (0 - point0_left.x) + point0_left.y);//计算端点 y=k(x-x0)+y0
-                    Point point2_left = new Point(width / 2, k_left * (width / 2 - point0_left.x) + point0_left.y);
+                    Point point2_left = new Point(width * 2/5, k_left * (width * 2/5 - point0_left.x) + point0_left.y);
                     Scalar line_color = new Scalar(255, 0, 0);//red
                     int line_thickness = 2;
                     Imgproc.line(img_line, point1_left, point2_left, line_color, line_thickness);
@@ -279,7 +279,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2{
                     Point point0_right = new Point(line_right_para.get(2, 0)[0], line_right_para.get(3, 0)[0]);
                     double k_right = line_right_para.get(1, 0)[0] / line_right_para.get(0, 0)[0];
                     Point point1_right = new Point(width, k_right * (width - point0_right.x) + point0_right.y);//计算端点 y=k(x-x0)+y0
-                    Point point2_right = new Point(width / 2, k_right * (width / 2 - point0_right.x) + point0_right.y);
+                    Point point2_right = new Point(width* 3/5, k_right * (width* 3/5 - point0_right.x) + point0_right.y);
                     Scalar line_color = new Scalar(255, 0, 0);//red
                     int line_thickness = 2;
                     Imgproc.line(img_line, point1_right, point2_right, line_color, line_thickness);
