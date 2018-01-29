@@ -23,7 +23,7 @@
             android:layout_width="100dp"
             android:layout_height="40dp"
             android:layout_marginBottom="20dp"
-            android:text="处理"/>
+            android:text="process"/>
     </RelativeLayout>
 
 </android.support.constraint.ConstraintLayout>
