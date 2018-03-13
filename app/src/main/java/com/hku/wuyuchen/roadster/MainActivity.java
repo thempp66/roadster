@@ -1,5 +1,9 @@
 package com.hku.wuyuchen.roadster;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -14,16 +18,26 @@ import org.opencv.android.OpenCVLoader;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewListener2;
 import org.opencv.android.LoaderCallbackInterface;
+import org.opencv.android.Utils;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfDouble;
 import org.opencv.core.MatOfFloat;
 import org.opencv.core.MatOfInt;
 import org.opencv.core.MatOfPoint;
+import org.opencv.core.MatOfRect;
 import org.opencv.core.Point;
+import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
+import org.opencv.features2d.Feature2D;
+import org.opencv.features2d.FeatureDetector;
+import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
+import org.opencv.ml.SVM;
+import org.opencv.objdetect.CascadeClassifier;
+import org.opencv.objdetect.HOGDescriptor;
 
 import android.R.string;
 import android.app.Activity;
@@ -32,11 +46,15 @@ import android.content.Context;
 import android.media.AudioManager;
 import android.media.SoundPool;
 import android.os.Bundle;
+import android.provider.FontsContract;
 import android.util.Log;
 import android.widget.Button;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.TextView;
+
+import static org.opencv.imgcodecs.Imgcodecs.CV_LOAD_IMAGE_COLOR;
+import static org.opencv.imgcodecs.Imgcodecs.imread;
 
 
 public class MainActivity extends Activity implements CvCameraViewListener2 {
@@ -44,11 +62,14 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     //OpenCV的相机接口
     private CameraBridgeViewBase mCVCamera;
     //缓存相机每帧输入的数据
-    private Mat mRgba, mTmp;
+    private Mat mRgba, mTmp, mGray;
     //按钮组件
-    private Button mButton;
+    private Button mbtn_LD;
+    private Button mbtb_DD;
     //当前处理状态
     private static int Cur_State = 0;
+    private static boolean lane_detection_open;
+    private static boolean distance_detection_open;
 
     private Size mSize0;
     private Mat mIntermediateMat;
@@ -69,6 +90,9 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     private int soundId;
     private long alert_timestamp;
 
+    private File                   mCascadeFile;
+    private CascadeClassifier      mJavaDetector;
+
     /**
      * 通过OpenCV管理Android服务，异步初始化OpenCV
      */
@@ -78,6 +102,36 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
             switch (status) {
                 case LoaderCallbackInterface.SUCCESS:
                     Log.i(TAG, "OpenCV loaded successfully");
+
+                    try {
+                        // load cascade file from application resources
+                        InputStream is = getResources().openRawResource(R.raw.lbp);
+                        File cascadeDir = getDir("cascade", Context.MODE_PRIVATE);
+                        mCascadeFile = new File(cascadeDir, "lbp.xml");
+                        FileOutputStream os = new FileOutputStream(mCascadeFile);
+
+                        byte[] buffer = new byte[4096];
+                        int bytesRead;
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            os.write(buffer, 0, bytesRead);
+                        }
+                        is.close();
+                        os.close();
+
+                        mJavaDetector = new CascadeClassifier(mCascadeFile.getAbsolutePath());
+                        if (mJavaDetector.empty()) {
+                            Log.e(TAG, "Failed to load cascade classifier");
+                            mJavaDetector = null;
+                        } else
+                            Log.i(TAG, "Loaded cascade classifier from " + mCascadeFile.getAbsolutePath());
+
+                        cascadeDir.delete();
+
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Log.e(TAG, "Failed to load cascade. Exception thrown: " + e);
+                    }
+
                     mCVCamera.enableView();
                     break;
                 default:
@@ -98,20 +152,43 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         mCVCamera = (CameraBridgeViewBase) findViewById(R.id.camera_view);
         mCVCamera.setCvCameraViewListener(this);
 
-        mButton = (Button) findViewById(R.id.deal_btn);
-        mButton.setOnClickListener(new OnClickListener() {
+
+        lane_detection_open = false;
+        mbtn_LD = (Button) findViewById(R.id.deal_btn);
+        mbtn_LD.setText("LD: OFF");
+        mbtn_LD.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (Cur_State < 1) {
-                    //切换状态
-                    Cur_State++;
+                if (lane_detection_open == false) {
+                    lane_detection_open = true;
+                    mbtn_LD.setText("LD: ON");
                 } else {
-                    //恢复初始状态
-                    Cur_State = 0;
+                    lane_detection_open = false;
+                    mbtn_LD.setText("LD: OFF");
                 }
             }
 
         });
+
+        distance_detection_open = false;
+        mbtb_DD = (Button) findViewById(R.id.deal_btn2);
+        mbtb_DD.setText("DD: OFF");
+        mbtb_DD.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (distance_detection_open == false) {
+                    distance_detection_open = true;
+                    mbtb_DD.setText("DD: ON");
+                } else {
+                    distance_detection_open = false;
+                    mbtb_DD.setText("DD: OFF");
+                }
+            }
+
+        });
+
+
+
     }
 
     @Override
@@ -188,85 +265,98 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         int height = (int) sizeRgba.height;
         int width = (int) sizeRgba.width;
 
-        switch (Cur_State) {
-            case 1:
-                //Step 1: Gray Scale Transformation
-                Imgproc.cvtColor(inputFrame.gray(), mRgba, Imgproc.COLOR_GRAY2RGBA, 4);
+        //车道检测功能
+        if (lane_detection_open == true) {
+            //Step 1: Gray Scale Transformation
+            Imgproc.cvtColor(inputFrame.gray(), mRgba, Imgproc.COLOR_GRAY2RGBA, 4);
 
-                //Step 2: Gaussian Smoothing
-                int ksize = 5; //Gaussian blur kernel size
-                Imgproc.GaussianBlur(mRgba, mRgba, new Size(ksize, ksize), 0);
+            //Step 2: Gaussian Smoothing
+            int ksize = 5; //Gaussian blur kernel size
+            Imgproc.GaussianBlur(mRgba, mRgba, new Size(ksize, ksize), 0);
 
-                //Step 3: Canny Edge Detection
-                int canny_lthreshold = 50;  //Canny edge detection low threshold
-                int canny_hthreshold = 150; //Canny edge detection high threshold
-                Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_RGBA2GRAY, 4);
-                Imgproc.Canny(mRgba, mRgba, canny_lthreshold, canny_hthreshold);
+            //Step 3: Canny Edge Detection
+            int canny_lthreshold = 50;  //Canny edge detection low threshold
+            int canny_hthreshold = 150; //Canny edge detection high threshold
+            Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_RGBA2GRAY, 4);
+            Imgproc.Canny(mRgba, mRgba, canny_lthreshold, canny_hthreshold);
 
-                //Step 4: ROI(Range of Interest)
-                Scalar color = new Scalar(0, 0, 0);//black
-                List<MatOfPoint> pts = new ArrayList<>();
-                MatOfPoint blk1 = new MatOfPoint(new Point(0, 0), new Point(0, height), new Point(width / 4, height * 3 / 5), new Point(width * 3 / 4, height * 3 / 5), new Point(width, height), new Point(width, 0));
-                pts.add(blk1);
-                Imgproc.fillPoly(mRgba, pts, color);
+            //Step 4: ROI(Range of Interest)
+            Scalar color = new Scalar(0, 0, 0);//black
+            List<MatOfPoint> pts = new ArrayList<>();
+            MatOfPoint blk1 = new MatOfPoint(new Point(0, 0), new Point(0, height), new Point(width / 4, height * 3 / 5), new Point(width * 3 / 4, height * 3 / 5), new Point(width, height), new Point(width, 0));
+            pts.add(blk1);
+            Imgproc.fillPoly(mRgba, pts, color);
 
-                //Step 5: Hough Transformation
-                int rho = 1;
-                double theta = Math.PI / 180;
-                int threshold = 15;
-                int min_line_length = 35;
-                int max_line_gap = 20;
-                Mat lines = new Mat();
-                Imgproc.HoughLinesP(mRgba, lines, rho, theta, threshold, min_line_length, max_line_gap);
+            //Step 5: Hough Transformation
+            int rho = 1;
+            double theta = Math.PI / 180;
+            int threshold = 15;
+            int min_line_length = 35;
+            int max_line_gap = 20;
+            Mat lines = new Mat();
+            Imgproc.HoughLinesP(mRgba, lines, rho, theta, threshold, min_line_length, max_line_gap);
 
-                //Step 6: Lane division
-                Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_GRAY2RGBA, 4);//恢复成彩图，车道线为彩色
-                Core.setIdentity(mRgba, new Scalar(0, 0, 0));//变成纯黑图
-                List<Point> points_left = new LinkedList<Point>();
-                List<Point> points_right = new LinkedList<Point>();
-                for (int y = 0; y < lines.rows(); y++) {
-                    double[] vec = lines.get(y, 0);
-                    double x1 = vec[0];
-                    double y1 = vec[1];
-                    double x2 = vec[2];
-                    double y2 = vec[3];
-                    double k = 0;
-                    if (x2 != x1) {
-                        k = (y1 - y2) / (x2 - x1);//傻逼的安卓坐标系
-                    }
-                    if (x2 == x1 || k > 0 && k > Math.tan(Math.toRadians(15))) {
-                        //90°也算，即x2==x1
-                        //左车道线
-                        //过滤干扰横线
-                        //车道线角度范围15~165°
-                        Point start = new Point(x1, y1);
-                        Point end = new Point(x2, y2);
-                        points_left.add(start);
-                        points_left.add(end);
-                    }
-                    if (k < 0 && k < Math.tan(Math.toRadians(165))) {
-                        //右车道线
-                        //过滤干扰横线
-                        //车道线角度范围15~165°
-                        Point start = new Point(x1, y1);
-                        Point end = new Point(x2, y2);
-                        points_right.add(start);
-                        points_right.add(end);
-                    }
+            //Step 6: Lane division
+            Imgproc.cvtColor(mRgba, mRgba, Imgproc.COLOR_GRAY2RGBA, 4);//恢复成彩图，车道线为彩色
+            Core.setIdentity(mRgba, new Scalar(0, 0, 0));//变成纯黑图
+            List<Point> points_left = new LinkedList<Point>();
+            List<Point> points_right = new LinkedList<Point>();
+            for (int y = 0; y < lines.rows(); y++) {
+                double[] vec = lines.get(y, 0);
+                double x1 = vec[0];
+                double y1 = vec[1];
+                double x2 = vec[2];
+                double y2 = vec[3];
+                double k = 0;
+                if (x2 != x1) {
+                    k = (y1 - y2) / (x2 - x1);//傻逼的安卓坐标系
                 }
+                if (x2 == x1 || k > 0 && k > Math.tan(Math.toRadians(15))) {
+                    //90°也算，即x2==x1
+                    //左车道线
+                    //过滤干扰横线
+                    //车道线角度范围15~165°
+                    Point start = new Point(x1, y1);
+                    Point end = new Point(x2, y2);
+                    points_left.add(start);
+                    points_left.add(end);
+                }
+                if (k < 0 && k < Math.tan(Math.toRadians(165))) {
+                    //右车道线
+                    //过滤干扰横线
+                    //车道线角度范围15~165°
+                    Point start = new Point(x1, y1);
+                    Point end = new Point(x2, y2);
+                    points_right.add(start);
+                    points_right.add(end);
+                }
+            }
 
-                //Step 7 Linear Regression & draw the two line
-                make_line(points_left, mRgba, width, height);//画左车道
-                make_line(points_right, mRgba, width, height);//画右车道
+            //Step 7 Linear Regression & draw the two line
+            make_line(points_left, mRgba, width, height);//画左车道
+            make_line(points_right, mRgba, width, height);//画右车道
 
-                //Step 8: Add to the original image
-                Core.addWeighted(mRgba, 0.8, mTmp, 1, 0, mRgba);
-                break;
-            default:
-                //显示原图
-                mRgba = inputFrame.rgba();
-                break;
+            //Step 8: Add to the original image
+            Core.addWeighted(mRgba, 0.8, mTmp, 1, 0, mRgba);
         }
+
+        //距离检测功能
+        if (distance_detection_open == true) {
+            mGray = inputFrame.gray();
+
+            MatOfRect founds = new MatOfRect();
+            if (mJavaDetector != null)
+                mJavaDetector.detectMultiScale(mGray, founds, 1.1, 3, 0, new Size(), new Size()); // TODO: objdetect.CV_HAAR_SCALE_IMAGE
+
+            Rect[] foundsArray = founds.toArray();
+            for (int i = 0; i < foundsArray.length; i++) {
+                Imgproc.rectangle(mRgba, foundsArray[i].tl(), foundsArray[i].br(), new Scalar(0, 255, 0), 1);
+                Log.i("coordinate", "" + foundsArray[i].br().y);
+                double distance = foundsArray[i].br().y * -0.185185 + 86.296296;
+                Imgproc.putText(mRgba, ""+(int)distance+"m", new Point(foundsArray[i].tl().x, foundsArray[i].br().y + 15), 1, 1, new Scalar(0, 255, 0));
+            }
+        }
+
         //返回处理后的结果数据
         return mRgba;
     }

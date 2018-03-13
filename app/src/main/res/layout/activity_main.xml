@@ -17,13 +17,24 @@
     <RelativeLayout
         android:layout_width="fill_parent"
         android:layout_height="fill_parent"
-        android:gravity="bottom|center_horizontal">
+        android:gravity="bottom|center_horizontal"
+        tools:layout_editor_absoluteX="-38dp"
+        tools:layout_editor_absoluteY="-79dp">
+
         <Button
             android:id="@+id/deal_btn"
             android:layout_width="100dp"
             android:layout_height="40dp"
             android:layout_marginBottom="20dp"
-            android:text="process"/>
+            android:text="process" />
+
+        <Button
+            android:id="@+id/deal_btn2"
+            android:layout_width="100dp"
+            android:layout_height="40dp"
+            android:layout_marginBottom="20dp"
+            android:layout_toRightOf="@+id/deal_btn"
+            android:text="process2" />
     </RelativeLayout>
 
 </android.support.constraint.ConstraintLayout>
