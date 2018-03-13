@@ -350,10 +350,18 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
             Rect[] foundsArray = founds.toArray();
             for (int i = 0; i < foundsArray.length; i++) {
-                Imgproc.rectangle(mRgba, foundsArray[i].tl(), foundsArray[i].br(), new Scalar(0, 255, 0), 1);
-                Log.i("coordinate", "" + foundsArray[i].br().y);
+                if (foundsArray[i].tl().x<width/4 || foundsArray[i].tl().y<height/3 || foundsArray[i].br().x>width*3/4 || foundsArray[i].br().y>height) continue;//忽略ROI以外
                 double distance = foundsArray[i].br().y * -0.185185 + 86.296296;
-                Imgproc.putText(mRgba, ""+(int)distance+"m", new Point(foundsArray[i].tl().x, foundsArray[i].br().y + 15), 1, 1, new Scalar(0, 255, 0));
+                Scalar dis_color = new Scalar(0, 255, 0);
+                if (distance <= 12) {
+                    dis_color = new Scalar(255,0,0);
+                    if (System.currentTimeMillis()-alert_timestamp>1500){
+                        soundPool.play(soundId, 1.0f, 1.0f, 0, 0, 1.0f);
+                        alert_timestamp = System.currentTimeMillis();
+                    }
+                }
+                Imgproc.rectangle(mRgba, foundsArray[i].tl(), foundsArray[i].br(), dis_color, 1);
+                Imgproc.putText(mRgba, ""+(int)distance+"m", new Point(foundsArray[i].tl().x, foundsArray[i].br().y + 15), 1, 1, dis_color);
             }
         }
 
